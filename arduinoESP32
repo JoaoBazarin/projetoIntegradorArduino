@@ -1,0 +1,176 @@
+#include <WiFi.h>
+#include "ESPAsyncWebServer.h"
+#include <FirebaseESP32.h>
+ 
+Definição do pinos do ESP32
+#define sensor 32
+#define bomba 26
+ 
+Nome da rede Wifi e senha
+const char* ssid = "EC";
+const char* password = "";
+ 
+Host e chave de acesso ao Firebase
+#define host "irrigacao-9dedf.firebaseio.com"
+#define chave "rRA4cGGTlV7O5NQUcpmS8gSkP9opjeOl1iy6jgut"
+ 
+FirebaseData firebaseData;
+ 
+Variáveis  de umidade
+byte UmidPercent = 0;
+int ValorAnalog = 0;
+int umidade = 0;
+ 
+Define a porta do servidor local
+AsyncWebServer server(80);
+ 
+String readumidade() {
+    return String(UmidPercent);
+ 
+}
+String umidadeD() {
+    return String(umidade);
+}
+ 
+Pagina html
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+ <style>
+    html {
+     display: inline-block;
+     margin: 0px auto;
+     text-align: center;
+    }
+      p { font-size: 3.5rem; }
+    .units { font-size: 1.2rem; }
+    .umi{
+      font-size: 3.5rem;
+      vertical-align:middle;
+      padding-bottom: 15px;
+    }
+        .umi2{
+      font-size: 2.5rem;
+      vertical-align:middle;
+      padding-bottom: 15px;
+    }
+  </style>
+</head>
+<body>
+  <p style="text-align: center;"><strong>Projeto Integrador:</strong><span style="color: #008000;"> Irriga&ccedil;&atilde;o automatizada</span></p>
+  <p>  
+   <i class="fas fa-tint" style="color:#00add6;"></i> 
+   
+    <span class="umi"> UMIDADE DO SOLO: </span> 
+    <span class="umi" id="umidade">%UMIDADE%</span>
+    <span class="umi">&percnt;</span>
+   </p>  
+ 
+    <p>  
+     
+    <span class="umi"> UMIDADE DESEJADA: </span> 
+    <span class="umi" id="umidadeD">%UMIDADED%</span>
+    <span class="umi">&percnt;</span>
+   </p>  
+</body>
+<script>
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("umidade").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/umidade", true);
+  xhttp.send();
+}, 250 ) ;
+ 
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("umidadeD").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/umidadeD", true);
+  xhttp.send();
+}, 250 ) ;
+</script>
+</html>)rawliteral";
+ 
+String processor(const String& var){
+ 
+  if(var == "UMIDADE"){
+    return readumidade();
+  }
+  if(var == "UMIDADED"){
+    return umidadeD();
+   }
+     return String();
+}
+ 
+void setup() {
+define o pino do sensor como entrada
+pinMode(sensor, INPUT);
+pinMode(bomba, OUTPUT); 
+digitalWrite(bomba, HIGH);
+Serial.begin(115200);
+ 
+Conecta no Wifi
+WiFi.mode(WIFI_AP);
+  WiFi.begin(ssid, password);
+ 
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi..");
+  }
+ 
+  Serial.println(WiFi.localIP());
+ 
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", index_html, processor);
+  });
+  server.on("/umidade", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", readumidade().c_str());
+  });
+  server.on("/umidadeD", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", umidadeD().c_str());
+  });
+  
+Inicia servidor
+server.begin();
+ 
+conecta no banco de dados do firebase
+Firebase.begin(host,chave);
+ 
+}
+ 
+void loop(){
+Faz a leitura do sensor
+  ValorAnalog = analogRead(sensor); 
+  UmidPercent = map(ValorAnalog, 0, 4095, 100, 0);
+  
+  Envia a porcentagem da umidade para a umidade atual no firebase
+  Firebase.setInt(firebaseData,"/Umidadeatual", UmidPercent);
+  
+  Recebe a umidade desejada do firebase
+  Firebase.getInt(firebaseData,"/Umidadedesejada", umidade);
+ 
+Se a umidade estiver menor que a umidade desejada liga o modulo rele acionado a bomba por 500 milissegundos desliga e espera 5000 milissegundos e volta ao inicio do “void loop()”
+ 
+     if (UmidPercent < umidade){
+         digitalWrite(bomba, LOW);
+         delay(500);
+         digitalWrite(bomba, HIGH);
+         delay(5000);
+        loop();
+     }
+ 
+Se a umidade estiver maior ou igual a umidade desejada mantem a bomba desligada
+ 
+      if (UmidPercent >= umidade){
+         digitalWrite(bomba, HIGH);
+     }
+}
